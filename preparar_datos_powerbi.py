@@ -482,14 +482,14 @@ def main():
         if df is not None:
             normalizar_columnas(df)
 
-    # Mostrar columnas disponibles para diagnóstico
+    # Guardar columnas en archivo de texto Y mostrar en pantalla
     print("\n--- Columnas disponibles ---")
-    if df_per is not None:
-        print(f"PERSONAS : {list(df_per.columns)}")
-    if df_hog is not None:
-        print(f"HOGARES  : {list(df_hog.columns)}")
-    if df_viv is not None:
-        print(f"VIVIENDA : {list(df_viv.columns)}")
+    with open('columnas_debug.txt', 'w', encoding='utf-8') as dbg:
+        for nombre, df in [('PERSONAS', df_per), ('HOGARES', df_hog), ('VIVIENDA', df_viv)]:
+            if df is not None:
+                linea = f"{nombre} : {list(df.columns)}"
+                print(linea)
+                dbg.write(linea + '\n')
 
     print("\n--- Procesando tareas ---")
 
@@ -519,6 +519,7 @@ def main():
     print("=" * 60)
     print("\nSiguiente paso: Importa estos CSVs en Power BI")
     print("(Inicio -> Obtener datos -> Texto/CSV)")
+    input("\nPresiona Enter para cerrar...")
 
 
 if __name__ == '__main__':
