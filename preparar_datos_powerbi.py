@@ -26,8 +26,21 @@ import numpy as np
 import os
 import sys
 
-# Siempre trabajar en la carpeta donde está este script
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Resolver carpeta del script con múltiples estrategias (robusto ante espacios,
+# tildes, paréntesis en el nombre del archivo o la ruta)
+def _get_script_dir():
+    for candidate in [
+        getattr(sys.modules['__main__'], '__file__', None),
+        sys.argv[0] if sys.argv else None,
+        __file__,
+    ]:
+        if candidate:
+            d = os.path.dirname(os.path.abspath(candidate))
+            if os.path.isdir(d):
+                return d
+    return os.getcwd()
+
+SCRIPT_DIR = _get_script_dir()
 os.chdir(SCRIPT_DIR)
 
 # ── Configuración: ajusta estos nombres si tu archivo tiene nombres distintos ──
