@@ -60,13 +60,17 @@ NOMBRES_PROVINCIAS = {
 
 # ── Mapas de etiquetas ──
 MAPA_CINE = {
+    -99:'Sin dato',
     0:'0. Sin nivel', 1:'1. Parvularia', 2:'2. Básica',
     3:'3. Media (1° ciclo)', 4:'4. Media (2° ciclo)',
     5:'5. Técnico sup. (ciclo corto)', 6:'6. Universitaria/Licenciatura',
     7:'7. Magíster', 8:'8. Doctorado', 9:'9. No informa',
+    10:'10. Técnico nivel superior', 11:'11. Universitaria (en curso)',
+    12:'12. Sin nivel (≥15 años)',
 }
 
 MAPA_ACTIVIDAD = {
+    -99:'Sin dato',
     1:'Ocupado', 2:'Desocupado', 3:'Inactivo', 9:'No aplica (<15 años)',
 }
 
@@ -320,24 +324,31 @@ def main():
     print("=" * 60)
     print(f"\n  Carpeta: {SCRIPT_DIR}")
 
-    print("\n[1/3] Personas...")
+    # Para regenerar solo tarea4 más rápido, solo carga personas
+    solo_tarea4 = '--solo-tarea4' in sys.argv
+
+    print("\n[1] Cargando personas...")
     df_per = cargar_csv('personas_valpo.csv')
-
-    print("\n[2/3] Hogares... (no se usa en tareas 3-6, se omite)")
-
-    print("\n[3/3] Vivienda...")
-    df_viv = cargar_csv('vivienda_valpo.csv')
-
-    if df_per is None or df_viv is None:
-        print("\nERROR: faltan archivos. Abortando.")
+    if df_per is None:
+        print("\nERROR: falta personas_valpo.csv. Abortando.")
         input("\nPresiona Enter para cerrar...")
         return
 
-    print("\n--- Procesando ---")
-    tarea3_hacinamiento(df_viv)
-    tarea4_educacion_actividad(df_per)
-    tarea5_servicios_basicos(df_viv)
-    tarea6_indicador_desarrollo(df_per, df_viv)
+    if solo_tarea4:
+        print("\n--- Regenerando solo Tarea 4 ---")
+        tarea4_educacion_actividad(df_per)
+    else:
+        print("\n[2] Cargando vivienda...")
+        df_viv = cargar_csv('vivienda_valpo.csv')
+        if df_viv is None:
+            print("\nERROR: falta vivienda_valpo.csv. Abortando.")
+            input("\nPresiona Enter para cerrar...")
+            return
+        print("\n--- Procesando todo ---")
+        tarea3_hacinamiento(df_viv)
+        tarea4_educacion_actividad(df_per)
+        tarea5_servicios_basicos(df_viv)
+        tarea6_indicador_desarrollo(df_per, df_viv)
 
     print("\n" + "=" * 60)
     print("  ✓ LISTO — Archivos generados:")
