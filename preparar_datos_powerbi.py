@@ -60,18 +60,20 @@ NOMBRES_PROVINCIAS = {
 
 # ── Mapas de etiquetas ──
 MAPA_CINE = {
-    -99:'Sin dato',
-    0:'0. Sin nivel', 1:'1. Parvularia', 2:'2. Básica',
-    3:'3. Media (1° ciclo)', 4:'4. Media (2° ciclo)',
-    5:'5. Técnico sup. (ciclo corto)', 6:'6. Universitaria/Licenciatura',
-    7:'7. Magíster', 8:'8. Doctorado', 9:'9. No informa',
-    10:'10. Técnico nivel superior', 11:'11. Universitaria (en curso)',
-    12:'12. Sin nivel (≥15 años)',
+    1:'1. Sin educación', 2:'2. Básica',
+    3:'3. Media baja', 4:'4. Media alta',
+    5:'5. Post-secundaria', 6:'6. Técnica superior',
+    7:'7. Universitaria', 8:'8. Postgrado',
 }
 
 MAPA_ACTIVIDAD = {
-    -99:'Sin dato',
-    1:'Ocupado', 2:'Desocupado', 3:'Inactivo', 9:'No aplica (<15 años)',
+    1:'Ocupado', 2:'Desocupado', 3:'Inactivo',
+}
+
+# indice_hacinamiento en el Censo 2024 es CATEGÓRICO:
+# 1 = Sin hacinamiento, 2 = Hacinamiento medio, 3 = Hacinamiento crítico
+MAPA_HACINAMIENTO = {
+    1:'Sin hacinamiento', 2:'Hacinamiento medio', 3:'Hacinamiento crítico',
 }
 
 MAPA_AGUA = {
@@ -120,42 +122,43 @@ def tarea3_hacinamiento(df_viv):
     df = df_viv.copy()
     agregar_nombres(df)
 
-    # El índice ya viene calculado en el CSV de vivienda
     if COL_HACI not in df.columns:
         print("  ERROR: columna indice_hacinamiento no encontrada en vivienda.")
         return
 
-    def clasificar(idx):
-        if pd.isna(idx):   return 'Sin dato'
-        if idx <= 2.4:     return 'Sin hacinamiento'
-        elif idx <= 3.4:   return 'Hacinamiento medio'
-        elif idx <= 4.9:   return 'Hacinamiento alto'
-        else:              return 'Hacinamiento crítico'
+    # indice_hacinamiento es CATEGÓRICO: 1=Sin hacinamiento, 2=Medio, 3=Crítico
+    # Se excluyen -99 (no aplica) y NaN
+    df = df[df[COL_HACI].isin([1, 2, 3])].copy()
+    df['categoria_hacinamiento'] = df[COL_HACI].map(MAPA_HACINAMIENTO)
 
-    df['categoria_hacinamiento'] = df[COL_HACI].apply(clasificar)
     group = ['nombre_provincia', 'nombre_comuna']
 
-    resumen = df.groupby(group).agg(
-        total_viviendas=(COL_HACI, 'count'),
-        indice_hacinamiento_promedio=(COL_HACI, 'mean'),
-        promedio_personas=('cant_per', 'mean') if 'cant_per' in df.columns else (COL_HACI, 'count'),
-        promedio_dormitorios=(COL_NDORM, 'mean') if COL_NDORM in df.columns else (COL_HACI, 'count'),
-        sin_hacinamiento=('categoria_hacinamiento', lambda x: (x=='Sin hacinamiento').sum()),
-        hacinamiento_medio=('categoria_hacinamiento', lambda x: (x=='Hacinamiento medio').sum()),
-        hacinamiento_alto=('categoria_hacinamiento', lambda x: (x=='Hacinamiento alto').sum()),
-        hacinamiento_critico=('categoria_hacinamiento', lambda x: (x=='Hacinamiento crítico').sum()),
-    ).reset_index()
+    agg = {'total_viviendas': (COL_HACI, 'count')}
+    if 'cant_per' in df.columns:
+        agg['promedio_personas'] = ('cant_per', 'mean')
+    if COL_NDORM in df.columns:
+        agg['promedio_dormitorios'] = (COL_NDORM, 'mean')
+    agg['sin_hacinamiento']    = ('categoria_hacinamiento', lambda x: (x=='Sin hacinamiento').sum())
+    agg['hacinamiento_medio']  = ('categoria_hacinamiento', lambda x: (x=='Hacinamiento medio').sum())
+    agg['hacinamiento_critico']= ('categoria_hacinamiento', lambda x: (x=='Hacinamiento crítico').sum())
+
+    resumen = df.groupby(group).agg(**agg).reset_index()
 
     resumen['pct_hacinados'] = (
-        (resumen['hacinamiento_medio'] + resumen['hacinamiento_alto'] + resumen['hacinamiento_critico'])
+        (resumen['hacinamiento_medio'] + resumen['hacinamiento_critico'])
         / resumen['total_viviendas'] * 100
     ).round(2)
-    resumen['indice_hacinamiento_promedio'] = resumen['indice_hacinamiento_promedio'].round(3)
+
+    if 'promedio_personas' in resumen.columns:
+        resumen['promedio_personas'] = resumen['promedio_personas'].round(2)
+    if 'promedio_dormitorios' in resumen.columns:
+        resumen['promedio_dormitorios'] = resumen['promedio_dormitorios'].round(2)
 
     resumen.to_csv('tarea3_hacinamiento.csv', index=False, encoding='utf-8-sig')
     print(f"  ✓ tarea3_hacinamiento.csv ({len(resumen)} comunas)")
+    print("  Top 5 por % hacinados:")
+    print(resumen.nlargest(5, 'pct_hacinados')[['nombre_comuna','pct_hacinados','promedio_personas']].to_string(index=False))
 
-    # Detalle por vivienda para scatter plot
     cols_det = [c for c in ['nombre_provincia','nombre_comuna', COL_HACI,
                              'cant_per', COL_NDORM, 'categoria_hacinamiento'] if c in df.columns]
     df[cols_det].to_csv('tarea3_hacinamiento_detalle.csv', index=False, encoding='utf-8-sig')
@@ -174,11 +177,18 @@ def tarea4_educacion_actividad(df_per):
         print(f"  ERROR: faltan columnas {COL_EDUC} o {COL_ACTIVIDAD}")
         return
 
-    # Solo población >= 15 años para análisis laboral
-    df15 = df[df[COL_EDAD] >= 15].copy()
+    # Solo población >= 15 años, excluir -99 (no aplica) en ambas variables
+    df15 = df[
+        (df[COL_EDAD] >= 15) &
+        (df[COL_EDUC].notna()) & (df[COL_EDUC] != -99) & (df[COL_EDUC] > 0) &
+        (df[COL_ACTIVIDAD].notna()) & (df[COL_ACTIVIDAD] != -99) &
+        (df[COL_ACTIVIDAD].isin([1, 2, 3]))
+    ].copy()
 
-    df15['nivel_educativo'] = df15[COL_EDUC].map(MAPA_CINE).fillna(df15[COL_EDUC].astype(str))
-    df15['condicion_actividad'] = df15[COL_ACTIVIDAD].map(MAPA_ACTIVIDAD).fillna(df15[COL_ACTIVIDAD].astype(str))
+    # Códigos 8+ se agrupan como Postgrado (igual que tarea_1)
+    df15['_cine_agrup'] = df15[COL_EDUC].apply(lambda x: min(int(x), 8) if pd.notna(x) else np.nan)
+    df15['nivel_educativo']    = df15['_cine_agrup'].map(MAPA_CINE).fillna('Sin dato')
+    df15['condicion_actividad'] = df15[COL_ACTIVIDAD].map(MAPA_ACTIVIDAD).fillna('Sin dato')
 
     group = ['nombre_provincia', 'nombre_comuna', 'nivel_educativo', 'condicion_actividad']
 
@@ -262,14 +272,16 @@ def tarea6_indicador_desarrollo(df_per, df_viv):
         lambda x: (x[COL_EDAD] >= 65).sum() / len(x) * 100
     ).reset_index(name='pct_mayores65')
 
-    # 2. Educación baja: % con CINE 0 (sin nivel) o 1 (parvularia) o 2 (básica)
-    educ = per.groupby(group_per).apply(
-        lambda x: x[COL_EDUC].isin([0, 1, 2]).sum() / len(x) * 100
+    # 2. Educación baja: % con CINE 1 o 2 (sin educación o básica), excluyendo -99
+    per_edu = per[per[COL_EDUC].notna() & (per[COL_EDUC] != -99) & (per[COL_EDUC] > 0)]
+    educ = per_edu.groupby(group_per).apply(
+        lambda x: x[COL_EDUC].isin([1, 2]).sum() / len(x) * 100
     ).reset_index(name='pct_educ_baja')
 
-    # 3. Hacinamiento: % viviendas con indice >= 2.5
-    hac = viv.groupby(group_viv).apply(
-        lambda x: (x[COL_HACI] >= 2.5).sum() / len(x) * 100
+    # 3. Hacinamiento: % viviendas con código 2 (medio) o 3 (crítico)
+    viv_hac = viv[viv[COL_HACI].isin([1, 2, 3])].copy()
+    hac = viv_hac.groupby(group_viv).apply(
+        lambda x: (x[COL_HACI] >= 2).sum() / len(x) * 100
     ).reset_index(name='pct_hacinamiento')
 
     # 4. Brecha de servicios: promedio de % sin acceso a los 3 servicios
