@@ -26,6 +26,10 @@ import numpy as np
 import os
 import sys
 
+# Siempre trabajar en la carpeta donde está este script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(SCRIPT_DIR)
+
 # ── Configuración: ajusta estos nombres si tu archivo tiene nombres distintos ──
 PERSONAS_FILE  = 'personas_valpo.csv'
 HOGARES_FILE   = 'hogares_valpo.csv'
@@ -435,6 +439,7 @@ def main():
     print("  PREPARACIÓN DE DATOS PARA POWER BI - TALLER 2")
     print("  Censo 2024 - Región de Valparaíso")
     print("=" * 60)
+    print(f"\n  Carpeta de trabajo: {SCRIPT_DIR}")
 
     # Cargar datos
     print("\n[1/3] Cargando Base de Personas...")
