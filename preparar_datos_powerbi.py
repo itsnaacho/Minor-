@@ -77,7 +77,7 @@ def cargar_csv(filename, alternativo=None):
     for f in [filename, alternativo]:
         if f and os.path.exists(f):
             print(f"  Cargando: {f} ...")
-            df = pd.read_csv(f, sep=None, engine='python', encoding='utf-8', low_memory=False)
+            df = pd.read_csv(f, sep=None, engine='python', encoding='utf-8')
             print(f"  -> {len(df):,} filas, {len(df.columns)} columnas")
             return df
     print(f"  ERROR: No se encontró {filename}. Verifica que el archivo esté en la misma carpeta.")
