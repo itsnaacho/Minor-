@@ -107,7 +107,6 @@ def cargar_csv(filename):
 
 
 def agregar_nombres(df, col_comuna=COL_COMUNA, col_provincia=COL_PROVINCIA):
-    """Agrega columnas con nombres legibles de provincia y comuna."""
     if col_provincia in df.columns:
         df['nombre_provincia'] = df[col_provincia].map(NOMBRES_PROVINCIAS).fillna(df[col_provincia].astype(str))
     if col_comuna in df.columns:
@@ -115,10 +114,26 @@ def agregar_nombres(df, col_comuna=COL_COMUNA, col_provincia=COL_PROVINCIA):
     return df
 
 
+def calcular_top10(df_per):
+    """Devuelve set de nombres de las 10 comunas más pobladas (igual que tarea_1)."""
+    top10_codigos = df_per[COL_COMUNA].value_counts().head(10).index.tolist()
+    top10_nombres = {NOMBRES_COMUNAS.get(c, str(c)) for c in top10_codigos}
+    print(f"\n  Top 10 comunas más pobladas: {sorted(top10_nombres)}")
+    return top10_nombres
+
+
+def agregar_top10(df_resumen, top10_nombres):
+    """Agrega columna es_top10 a un dataframe con columna nombre_comuna."""
+    df_resumen['es_top10'] = df_resumen['nombre_comuna'].isin(top10_nombres).map(
+        {True: 'Top 10', False: 'Resto región'}
+    )
+    return df_resumen
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # TAREA 3 — Hacinamiento (fuente: VIVIENDA)
 # ══════════════════════════════════════════════════════════════════════════════
-def tarea3_hacinamiento(df_viv):
+def tarea3_hacinamiento(df_viv, top10_nombres=None):
     print("\n=== TAREA 3: Hacinamiento ===")
     df = df_viv.copy()
     agregar_nombres(df)
@@ -155,10 +170,16 @@ def tarea3_hacinamiento(df_viv):
     if 'promedio_dormitorios' in resumen.columns:
         resumen['promedio_dormitorios'] = resumen['promedio_dormitorios'].round(2)
 
+    if top10_nombres:
+        agregar_top10(resumen, top10_nombres)
     resumen.to_csv('tarea3_hacinamiento.csv', index=False, encoding='utf-8-sig')
     print(f"  ✓ tarea3_hacinamiento.csv ({len(resumen)} comunas)")
-    print("  Top 5 por % hacinados:")
+    print("  Top 5 por % hacinados (todas las comunas):")
     print(resumen.nlargest(5, 'pct_hacinados')[['nombre_comuna','pct_hacinados','promedio_personas']].to_string(index=False))
+    if top10_nombres:
+        top10_df = resumen[resumen['es_top10']=='Top 10']
+        print("  Top 5 por % hacinados (solo top 10 comunas):")
+        print(top10_df.nlargest(5, 'pct_hacinados')[['nombre_comuna','pct_hacinados','promedio_personas']].to_string(index=False))
 
     cols_det = [c for c in ['nombre_provincia','nombre_comuna', COL_HACI,
                              'cant_per', COL_NDORM, 'categoria_hacinamiento'] if c in df.columns]
@@ -169,7 +190,7 @@ def tarea3_hacinamiento(df_viv):
 # ══════════════════════════════════════════════════════════════════════════════
 # TAREA 4 — Educación y Condición de Actividad (fuente: PERSONAS)
 # ══════════════════════════════════════════════════════════════════════════════
-def tarea4_educacion_actividad(df_per):
+def tarea4_educacion_actividad(df_per, top10_nombres=None):
     print("\n=== TAREA 4: Educación y Condición de Actividad ===")
     df = df_per.copy()
     agregar_nombres(df)
@@ -194,6 +215,8 @@ def tarea4_educacion_actividad(df_per):
     group = ['nombre_provincia', 'nombre_comuna', 'nivel_educativo', 'condicion_actividad']
 
     resultado = df15.groupby(group).size().reset_index(name='n_personas')
+    if top10_nombres:
+        agregar_top10(resultado, top10_nombres)
     resultado.to_csv('tarea4_educacion_actividad.csv', index=False, encoding='utf-8-sig')
     print(f"  ✓ tarea4_educacion_actividad.csv ({len(resultado):,} filas)")
 
@@ -208,7 +231,7 @@ def tarea4_educacion_actividad(df_per):
 # ══════════════════════════════════════════════════════════════════════════════
 # TAREA 5 — Servicios Básicos (fuente: VIVIENDA)
 # ══════════════════════════════════════════════════════════════════════════════
-def tarea5_servicios_basicos(df_viv):
+def tarea5_servicios_basicos(df_viv, top10_nombres=None):
     print("\n=== TAREA 5: Servicios Básicos ===")
     # Solo viviendas con dato válido en los 4 servicios (igual que tarea_1)
     cols_serv = [c for c in [COL_AGUA, COL_DISTRIB, COL_SHG, COL_ELEC] if c in df_viv.columns]
@@ -251,6 +274,8 @@ def tarea5_servicios_basicos(df_viv):
     res['pct_acceso_completo'] = (res['con_acceso_completo'] / res['total_viviendas'] * 100).round(2)
     res['indice_brecha_servicios'] = (100 - res['pct_acceso_completo']).round(2)
 
+    if top10_nombres:
+        agregar_top10(res, top10_nombres)
     res.to_csv('tarea5_servicios_basicos.csv', index=False, encoding='utf-8-sig')
     print(f"  ✓ tarea5_servicios_basicos.csv ({len(res)} comunas)")
 
@@ -267,7 +292,7 @@ def tarea5_servicios_basicos(df_viv):
 # ══════════════════════════════════════════════════════════════════════════════
 # TAREA 6 — Indicador de Desarrollo Compuesto
 # ══════════════════════════════════════════════════════════════════════════════
-def tarea6_indicador_desarrollo(df_per, df_viv):
+def tarea6_indicador_desarrollo(df_per, df_viv, top10_nombres=None):
     print("\n=== TAREA 6: Indicador de Desarrollo Compuesto ===")
 
     per = df_per.copy()
@@ -332,13 +357,19 @@ def tarea6_indicador_desarrollo(df_per, df_viv):
         lambda v: 'Alta prioridad' if v >= q66 else ('Media prioridad' if v >= q33 else 'Baja prioridad')
     )
 
+    if top10_nombres:
+        agregar_top10(ind, top10_nombres)
     ind.round(3).to_csv('tarea6_indicador_desarrollo.csv', index=False, encoding='utf-8-sig')
     print(f"  ✓ tarea6_indicador_desarrollo.csv ({len(ind)} comunas)")
 
-    print("\n  TOP 10 comunas prioritarias:")
     cols_show = ['nombre_provincia','nombre_comuna'] + dims + ['indicador_desarrollo_compuesto','prioridad_politica_publica']
     cols_show = [c for c in cols_show if c in ind.columns]
+    print("\n  TOP 10 prioritarias (todas las comunas):")
     print(ind.nlargest(10,'indicador_desarrollo_compuesto')[cols_show].to_string(index=False))
+    if top10_nombres:
+        top10_ind = ind[ind['es_top10']=='Top 10']
+        print("\n  TOP prioritarias (solo las 10 más pobladas — igual que tarea_1):")
+        print(top10_ind.nlargest(10,'indicador_desarrollo_compuesto')[cols_show].to_string(index=False))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -361,9 +392,11 @@ def main():
         input("\nPresiona Enter para cerrar...")
         return
 
+    top10 = calcular_top10(df_per)
+
     if solo_tarea4:
         print("\n--- Regenerando solo Tarea 4 ---")
-        tarea4_educacion_actividad(df_per)
+        tarea4_educacion_actividad(df_per, top10)
     else:
         print("\n[2] Cargando vivienda...")
         df_viv = cargar_csv('vivienda_valpo.csv')
@@ -372,10 +405,10 @@ def main():
             input("\nPresiona Enter para cerrar...")
             return
         print("\n--- Procesando todo ---")
-        tarea3_hacinamiento(df_viv)
-        tarea4_educacion_actividad(df_per)
-        tarea5_servicios_basicos(df_viv)
-        tarea6_indicador_desarrollo(df_per, df_viv)
+        tarea3_hacinamiento(df_viv, top10)
+        tarea4_educacion_actividad(df_per, top10)
+        tarea5_servicios_basicos(df_viv, top10)
+        tarea6_indicador_desarrollo(df_per, df_viv, top10)
 
     print("\n" + "=" * 60)
     print("  ✓ LISTO — Archivos generados:")
