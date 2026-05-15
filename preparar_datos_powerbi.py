@@ -441,6 +441,14 @@ def main():
     print("=" * 60)
     print(f"\n  Carpeta de trabajo: {SCRIPT_DIR}")
 
+    # Listar todos los CSV presentes en la carpeta del script
+    csvs_en_carpeta = [f for f in os.listdir(SCRIPT_DIR) if f.lower().endswith('.csv')]
+    if csvs_en_carpeta:
+        print(f"  CSV encontrados en esa carpeta: {csvs_en_carpeta}")
+    else:
+        print("  ADVERTENCIA: No hay ningún archivo .csv en la carpeta del script.")
+        print("  Copia tus archivos del Censo a esta carpeta y vuelve a ejecutar.")
+
     # Cargar datos
     print("\n[1/3] Cargando Base de Personas...")
     df_per = cargar_csv(PERSONAS_FILE, 'personas_valpo1.csv')
