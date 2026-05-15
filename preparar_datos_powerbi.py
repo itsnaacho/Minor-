@@ -2,23 +2,6 @@
 """
 Taller 2 - Preparación de datos para Power BI
 Tareas 3 a 6 - Censo 2024 Región de Valparaíso
-
-Ejecutar este script con los archivos CSV en la misma carpeta.
-Genera CSVs listos para importar directamente en Power BI.
-
-Uso:
-    python preparar_datos_powerbi.py
-
-Archivos de entrada requeridos:
-    - personas_valpo.csv  (o personas_valpo1.csv)
-    - hogares_valpo.csv   (o hogares_valpo1.csv)
-    - vivienda_valpo.csv  (o vivienda_valpo1.csv)
-
-Archivos de salida generados:
-    - tarea3_hacinamiento.csv
-    - tarea4_educacion_actividad.csv
-    - tarea5_servicios_basicos.csv
-    - tarea6_indicador_desarrollo.csv
 """
 
 import pandas as pd
@@ -26,8 +9,6 @@ import numpy as np
 import os
 import sys
 
-# Resolver carpeta del script con múltiples estrategias (robusto ante espacios,
-# tildes, paréntesis en el nombre del archivo o la ruta)
 def _get_script_dir():
     for candidate in [
         getattr(sys.modules['__main__'], '__file__', None),
@@ -43,410 +24,290 @@ def _get_script_dir():
 SCRIPT_DIR = _get_script_dir()
 os.chdir(SCRIPT_DIR)
 
-# ── Configuración: ajusta estos nombres si tu archivo tiene nombres distintos ──
-PERSONAS_FILE  = 'personas_valpo.csv'
-HOGARES_FILE   = 'hogares_valpo.csv'
-VIVIENDA_FILE  = 'vivienda_valpo.csv'
+# ── Nombres reales de columnas (confirmados del debug) ──
+COL_COMUNA    = 'comuna'
+COL_PROVINCIA = 'provincia'
+COL_EDAD      = 'edad'
+COL_SEXO      = 'sexo'
+COL_EDUC      = 'cine11'
+COL_ACTIVIDAD = 'sit_fuerza_trabajo'
+COL_HACI      = 'indice_hacinamiento'   # en vivienda, ya calculado
+COL_NPER_VIV  = 'cant_per'             # personas en vivienda
+COL_NDORM     = 'p5_num_dormitorios'
+COL_AGUA      = 'p6_fuente_agua'
+COL_ELEC      = 'p9_fuente_elect'
+COL_SHG       = 'p8_serv_hig'
 
-# Nombres de columnas clave (INE Censo 2024)
-# Si tu CSV usa nombres distintos, cámbialos aquí
-COL_COMUNA     = 'nombre_comuna'   # Nombre de la comuna
-COL_PROVINCIA  = 'nombre_provincia'
-COL_REGION     = 'region'
+# ── Tabla de nombres de comunas (Región de Valparaíso, códigos INE) ──
+NOMBRES_COMUNAS = {
+    5101:'Valparaíso', 5102:'Casablanca', 5103:'Concón', 5104:'Juan Fernández',
+    5105:'Puchuncaví', 5107:'Quintero', 5109:'Viña del Mar',
+    5201:'Isla de Pascua',
+    5301:'Los Andes', 5302:'Calle Larga', 5303:'Rinconada', 5304:'San Esteban',
+    5401:'La Ligua', 5402:'Cabildo', 5403:'Papudo', 5404:'Petorca', 5405:'Zapallar',
+    5501:'Quillota', 5502:'Calera', 5503:'Hijuelas', 5504:'La Cruz', 5506:'Nogales',
+    5601:'San Antonio', 5602:'Algarrobo', 5603:'Cartagena', 5604:'El Quisco',
+    5605:'El Tabo', 5606:'Santo Domingo',
+    5701:'San Felipe', 5702:'Catemu', 5703:'Llay-Llay', 5704:'Panquehue',
+    5705:'Putaendo', 5706:'Santa María',
+    5801:'Quilpué', 5802:'Limache', 5803:'Olmué', 5804:'Villa Alemana',
+}
 
-# Personas
-COL_EDAD       = 'p09'   # Edad en años
-COL_SEXO       = 'p08'   # 1=Hombre, 2=Mujer
-COL_EDUC       = 'p14'   # Nivel educativo máximo alcanzado
-COL_ACTIVIDAD  = 'p18'   # Condición de actividad (1=Ocupado, 2=Desocupado, 3=Inactivo)
+NOMBRES_PROVINCIAS = {
+    51:'Valparaíso', 52:'Isla de Pascua', 53:'Los Andes', 54:'Petorca',
+    55:'Quillota', 56:'San Antonio', 57:'San Felipe de Aconcagua', 58:'Marga Marga',
+}
 
-# Hogares
-COL_N_PERSONAS = 'cant_per'    # Número de personas en el hogar
-COL_N_CUARTOS  = 'cant_cuar'   # Número de cuartos/dormitorios exclusivos
+# ── Mapas de etiquetas ──
+MAPA_CINE = {
+    0:'0. Sin nivel', 1:'1. Parvularia', 2:'2. Básica',
+    3:'3. Media (1° ciclo)', 4:'4. Media (2° ciclo)',
+    5:'5. Técnico sup. (ciclo corto)', 6:'6. Universitaria/Licenciatura',
+    7:'7. Magíster', 8:'8. Doctorado', 9:'9. No informa',
+}
 
-# Vivienda (acceso a servicios - típicamente: 1=Sí accede, valores >1 = sin acceso o alternativa)
-COL_AGUA       = 'p03'   # Acceso a agua potable (procedencia del agua)
-COL_ELECTRIC   = 'p04'   # Acceso a electricidad
-COL_ALCANT     = 'p05'   # Sistema de eliminación de aguas servidas
+MAPA_ACTIVIDAD = {
+    1:'Ocupado', 2:'Desocupado', 3:'Inactivo', 9:'No aplica (<15 años)',
+}
 
-# ──────────────────────────────────────────────────────────────────────────────
+MAPA_AGUA = {
+    1:'Red pública', 2:'Pozo/noria', 3:'Camión aljibe',
+    4:'Río/vertiente', 5:'Otro',
+}
 
+MAPA_ELEC = {
+    1:'Red pública', 2:'Generador/panel solar', 3:'Sin electricidad',
+}
 
-def cargar_csv(filename, alternativo=None):
-    """Carga un CSV, intenta el archivo alternativo si el principal no existe."""
-    for f in [filename, alternativo]:
-        if f and os.path.exists(f):
-            print(f"  Cargando: {f} ...")
-            # Detectar separador leyendo solo la primera línea (evita cargar todo en memoria)
-            with open(f, 'r', encoding='utf-8', errors='replace') as fh:
-                primera = fh.readline()
-            sep = ';' if primera.count(';') > primera.count(',') else ','
-            df = pd.read_csv(f, sep=sep, encoding='utf-8', low_memory=False,
-                             encoding_errors='replace')
-            print(f"  -> {len(df):,} filas, {len(df.columns)} columnas")
-            return df
-    print(f"  ERROR: No se encontró {filename}. Verifica que el archivo esté en la misma carpeta.")
-    return None
-
-
-def detectar_columna(df, candidatos, nombre_logico):
-    """Busca entre candidatos cuál columna existe en el dataframe."""
-    for c in candidatos:
-        if c in df.columns:
-            return c
-    # Intenta búsqueda parcial (insensible a mayúsculas)
-    for c in df.columns:
-        for cand in candidatos:
-            if cand.lower() in c.lower():
-                print(f"  [AVISO] Usando '{c}' para '{nombre_logico}' (coincidencia parcial)")
-                return c
-    print(f"  [AVISO] No se encontró columna para '{nombre_logico}'. Candidatos: {candidatos}")
-    print(f"  Columnas disponibles: {list(df.columns)}")
-    return None
+MAPA_SHG = {
+    1:'WC - alcantarillado', 2:'WC - fosa séptica',
+    3:'Letrina/cajón', 4:'Sin servicio higiénico',
+}
 
 
-def normalizar_columnas(df):
-    """Convierte nombres de columnas a minúsculas y sin espacios extra."""
-    df.columns = df.columns.str.strip().str.lower()
+def cargar_csv(filename):
+    if not os.path.exists(filename):
+        print(f"  ERROR: No se encontró {filename}")
+        return None
+    print(f"  Cargando {filename} ...")
+    with open(filename, 'r', encoding='utf-8', errors='replace') as fh:
+        primera = fh.readline()
+    sep = ';' if primera.count(';') > primera.count(',') else ','
+    df = pd.read_csv(filename, sep=sep, encoding='utf-8',
+                     encoding_errors='replace', low_memory=False)
+    print(f"  -> {len(df):,} filas, {len(df.columns)} columnas")
+    return df
+
+
+def agregar_nombres(df, col_comuna=COL_COMUNA, col_provincia=COL_PROVINCIA):
+    """Agrega columnas con nombres legibles de provincia y comuna."""
+    if col_provincia in df.columns:
+        df['nombre_provincia'] = df[col_provincia].map(NOMBRES_PROVINCIAS).fillna(df[col_provincia].astype(str))
+    if col_comuna in df.columns:
+        df['nombre_comuna'] = df[col_comuna].map(NOMBRES_COMUNAS).fillna(df[col_comuna].astype(str))
     return df
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAREA 3 — Hacinamiento y Tamaño del Hogar
+# TAREA 3 — Hacinamiento (fuente: VIVIENDA)
 # ══════════════════════════════════════════════════════════════════════════════
-def tarea3_hacinamiento(df_hog):
-    print("\n=== TAREA 3: Hacinamiento y Tamaño del Hogar ===")
+def tarea3_hacinamiento(df_viv):
+    print("\n=== TAREA 3: Hacinamiento ===")
+    df = df_viv.copy()
+    agregar_nombres(df)
 
-    # Detectar columnas
-    col_com  = detectar_columna(df_hog, [COL_COMUNA, 'comuna', 'nom_comuna', 'nombre_comuna'], 'comuna')
-    col_prov = detectar_columna(df_hog, [COL_PROVINCIA, 'provincia', 'nom_provincia'], 'provincia')
-    col_per  = detectar_columna(df_hog, [COL_N_PERSONAS, 'n_personas', 'tot_per', 'personas_hogar', 'p_personas'], 'n_personas_hogar')
-    col_cuar = detectar_columna(df_hog, [COL_N_CUARTOS, 'n_cuartos', 'cant_cuartos', 'cuartos', 'p_cuartos', 'n_dormitorios'], 'n_cuartos')
-
-    if not all([col_com, col_per, col_cuar]):
-        print("  No se pudo procesar Tarea 3 por columnas faltantes.")
+    # El índice ya viene calculado en el CSV de vivienda
+    if COL_HACI not in df.columns:
+        print("  ERROR: columna indice_hacinamiento no encontrada en vivienda.")
         return
 
-    df = df_hog.copy()
-
-    # Filtrar datos válidos (al menos 1 cuarto para evitar división por 0)
-    df = df[df[col_cuar].notna() & (df[col_cuar] > 0)]
-    df = df[df[col_per].notna() & (df[col_per] > 0)]
-
-    # Calcular índice de hacinamiento: personas / cuartos
-    df['indice_hacinamiento'] = df[col_per] / df[col_cuar]
-
-    # Clasificar hacinamiento según estándar MINVU:
-    # <= 2.4 = Sin hacinamiento
-    # 2.5 - 3.4 = Hacinamiento medio
-    # 3.5 - 4.9 = Hacinamiento alto
-    # >= 5.0 = Hacinamiento crítico
     def clasificar(idx):
-        if idx <= 2.4:
-            return 'Sin hacinamiento'
-        elif idx <= 3.4:
-            return 'Hacinamiento medio'
-        elif idx <= 4.9:
-            return 'Hacinamiento alto'
-        else:
-            return 'Hacinamiento crítico'
+        if pd.isna(idx):   return 'Sin dato'
+        if idx <= 2.4:     return 'Sin hacinamiento'
+        elif idx <= 3.4:   return 'Hacinamiento medio'
+        elif idx <= 4.9:   return 'Hacinamiento alto'
+        else:              return 'Hacinamiento crítico'
 
-    df['categoria_hacinamiento'] = df['indice_hacinamiento'].apply(clasificar)
+    df['categoria_hacinamiento'] = df[COL_HACI].apply(clasificar)
+    group = ['nombre_provincia', 'nombre_comuna']
 
-    group_cols = [c for c in [col_prov, col_com] if c]
-
-    # Agregación por comuna
-    resultado = df.groupby(group_cols).agg(
-        total_hogares=(col_per, 'count'),
-        promedio_personas_hogar=(col_per, 'mean'),
-        promedio_cuartos=(col_cuar, 'mean'),
-        indice_hacinamiento_promedio=('indice_hacinamiento', 'mean'),
-        hogares_sin_hacinamiento=('categoria_hacinamiento', lambda x: (x == 'Sin hacinamiento').sum()),
-        hogares_hacinamiento_medio=('categoria_hacinamiento', lambda x: (x == 'Hacinamiento medio').sum()),
-        hogares_hacinamiento_alto=('categoria_hacinamiento', lambda x: (x == 'Hacinamiento alto').sum()),
-        hogares_hacinamiento_critico=('categoria_hacinamiento', lambda x: (x == 'Hacinamiento crítico').sum()),
+    resumen = df.groupby(group).agg(
+        total_viviendas=(COL_HACI, 'count'),
+        indice_hacinamiento_promedio=(COL_HACI, 'mean'),
+        promedio_personas=('cant_per', 'mean') if 'cant_per' in df.columns else (COL_HACI, 'count'),
+        promedio_dormitorios=(COL_NDORM, 'mean') if COL_NDORM in df.columns else (COL_HACI, 'count'),
+        sin_hacinamiento=('categoria_hacinamiento', lambda x: (x=='Sin hacinamiento').sum()),
+        hacinamiento_medio=('categoria_hacinamiento', lambda x: (x=='Hacinamiento medio').sum()),
+        hacinamiento_alto=('categoria_hacinamiento', lambda x: (x=='Hacinamiento alto').sum()),
+        hacinamiento_critico=('categoria_hacinamiento', lambda x: (x=='Hacinamiento crítico').sum()),
     ).reset_index()
 
-    resultado['pct_hacinados'] = (
-        (resultado['hogares_hacinamiento_medio'] +
-         resultado['hogares_hacinamiento_alto'] +
-         resultado['hogares_hacinamiento_critico']) / resultado['total_hogares'] * 100
+    resumen['pct_hacinados'] = (
+        (resumen['hacinamiento_medio'] + resumen['hacinamiento_alto'] + resumen['hacinamiento_critico'])
+        / resumen['total_viviendas'] * 100
     ).round(2)
+    resumen['indice_hacinamiento_promedio'] = resumen['indice_hacinamiento_promedio'].round(3)
 
-    resultado = resultado.round(3)
-    resultado.to_csv('tarea3_hacinamiento.csv', index=False, encoding='utf-8-sig')
-    print(f"  ✓ Exportado: tarea3_hacinamiento.csv ({len(resultado)} comunas)")
+    resumen.to_csv('tarea3_hacinamiento.csv', index=False, encoding='utf-8-sig')
+    print(f"  ✓ tarea3_hacinamiento.csv ({len(resumen)} comunas)")
 
-    # Tabla detallada por hogar (para scatter plot en PBI)
-    detalle = df[group_cols + [col_per, col_cuar, 'indice_hacinamiento', 'categoria_hacinamiento']].copy()
-    detalle.columns = group_cols + ['n_personas', 'n_cuartos', 'indice_hacinamiento', 'categoria_hacinamiento']
-    detalle.to_csv('tarea3_hacinamiento_detalle.csv', index=False, encoding='utf-8-sig')
-    print(f"  ✓ Exportado: tarea3_hacinamiento_detalle.csv ({len(detalle):,} hogares)")
+    # Detalle por vivienda para scatter plot
+    cols_det = [c for c in ['nombre_provincia','nombre_comuna', COL_HACI,
+                             'cant_per', COL_NDORM, 'categoria_hacinamiento'] if c in df.columns]
+    df[cols_det].to_csv('tarea3_hacinamiento_detalle.csv', index=False, encoding='utf-8-sig')
+    print(f"  ✓ tarea3_hacinamiento_detalle.csv ({len(df):,} viviendas)")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAREA 4 — Nivel Educativo y Condición de Actividad
+# TAREA 4 — Educación y Condición de Actividad (fuente: PERSONAS)
 # ══════════════════════════════════════════════════════════════════════════════
 def tarea4_educacion_actividad(df_per):
     print("\n=== TAREA 4: Educación y Condición de Actividad ===")
+    df = df_per.copy()
+    agregar_nombres(df)
 
-    col_com  = detectar_columna(df_per, [COL_COMUNA, 'comuna', 'nom_comuna', 'nombre_comuna'], 'comuna')
-    col_prov = detectar_columna(df_per, [COL_PROVINCIA, 'provincia', 'nom_provincia'], 'provincia')
-    col_educ = detectar_columna(df_per, [COL_EDUC, 'p14', 'nivel_educ', 'niv_educ', 'educacion'], 'nivel_educativo')
-    col_act  = detectar_columna(df_per, [COL_ACTIVIDAD, 'p18', 'cond_actividad', 'condicion_actividad', 'condicion_ocup', 'p17'], 'condicion_actividad')
-    col_edad = detectar_columna(df_per, [COL_EDAD, 'p09', 'edad'], 'edad')
-
-    if not all([col_com, col_educ, col_act]):
-        print("  No se pudo procesar Tarea 4 por columnas faltantes.")
+    if COL_EDUC not in df.columns or COL_ACTIVIDAD not in df.columns:
+        print(f"  ERROR: faltan columnas {COL_EDUC} o {COL_ACTIVIDAD}")
         return
 
-    df = df_per.copy()
+    # Solo población >= 15 años para análisis laboral
+    df15 = df[df[COL_EDAD] >= 15].copy()
 
-    # Filtrar solo población en edad de trabajar (15+) para análisis de actividad
-    if col_edad:
-        df_activos = df[df[col_edad] >= 15].copy()
-    else:
-        df_activos = df.copy()
+    df15['nivel_educativo'] = df15[COL_EDUC].map(MAPA_CINE).fillna(df15[COL_EDUC].astype(str))
+    df15['condicion_actividad'] = df15[COL_ACTIVIDAD].map(MAPA_ACTIVIDAD).fillna(df15[COL_ACTIVIDAD].astype(str))
 
-    # Mapear nivel educativo (códigos INE Censo 2024)
-    mapa_educ = {
-        0: '0. Sin educación formal',
-        1: '1. Ed. Parvularia',
-        2: '2. Básica incompleta',
-        3: '3. Básica completa',
-        4: '4. Media incompleta',
-        5: '5. Media completa',
-        6: '6. Técnica incompleta',
-        7: '7. Técnica completa',
-        8: '8. Universitaria incompleta',
-        9: '9. Universitaria completa',
-        10: '10. Postgrado',
-        99: '99. Ignorado',
-    }
+    group = ['nombre_provincia', 'nombre_comuna', 'nivel_educativo', 'condicion_actividad']
 
-    # Mapear condición de actividad (códigos INE Censo 2024)
-    mapa_actividad = {
-        1: 'Ocupado',
-        2: 'Desocupado (busca trabajo)',
-        3: 'Inactivo',
-        9: 'No aplica / < 15 años',
-    }
-
-    df_activos['nivel_educativo_label'] = df_activos[col_educ].map(mapa_educ).fillna(df_activos[col_educ].astype(str))
-    df_activos['condicion_actividad_label'] = df_activos[col_act].map(mapa_actividad).fillna(df_activos[col_act].astype(str))
-
-    group_cols = [c for c in [col_prov, col_com] if c]
-
-    # Tabla cruzada: educación × condición de actividad × comuna
-    resultado = df_activos.groupby(
-        group_cols + ['nivel_educativo_label', 'condicion_actividad_label']
-    ).size().reset_index(name='n_personas')
-
+    resultado = df15.groupby(group).size().reset_index(name='n_personas')
     resultado.to_csv('tarea4_educacion_actividad.csv', index=False, encoding='utf-8-sig')
-    print(f"  ✓ Exportado: tarea4_educacion_actividad.csv ({len(resultado):,} filas)")
+    print(f"  ✓ tarea4_educacion_actividad.csv ({len(resultado):,} filas)")
 
-    # Tabla resumen % por nivel educativo
-    total_por_educ = df_activos.groupby(
-        group_cols + ['nivel_educativo_label']
-    ).size().reset_index(name='total_nivel')
-
-    por_actividad = df_activos.groupby(
-        group_cols + ['nivel_educativo_label', 'condicion_actividad_label']
-    ).size().reset_index(name='n_personas')
-
-    resumen = por_actividad.merge(total_por_educ, on=group_cols + ['nivel_educativo_label'])
-    resumen['porcentaje'] = (resumen['n_personas'] / resumen['total_nivel'] * 100).round(2)
-
-    resumen.to_csv('tarea4_educacion_actividad_pct.csv', index=False, encoding='utf-8-sig')
-    print(f"  ✓ Exportado: tarea4_educacion_actividad_pct.csv")
+    # Con porcentajes
+    totales = df15.groupby(['nombre_provincia','nombre_comuna','nivel_educativo']).size().reset_index(name='total_nivel')
+    pct = resultado.merge(totales, on=['nombre_provincia','nombre_comuna','nivel_educativo'])
+    pct['porcentaje'] = (pct['n_personas'] / pct['total_nivel'] * 100).round(2)
+    pct.to_csv('tarea4_educacion_actividad_pct.csv', index=False, encoding='utf-8-sig')
+    print(f"  ✓ tarea4_educacion_actividad_pct.csv")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAREA 5 — Acceso a Servicios Básicos
+# TAREA 5 — Servicios Básicos (fuente: VIVIENDA)
 # ══════════════════════════════════════════════════════════════════════════════
 def tarea5_servicios_basicos(df_viv):
-    print("\n=== TAREA 5: Acceso a Servicios Básicos ===")
-
-    col_com  = detectar_columna(df_viv, [COL_COMUNA, 'comuna', 'nom_comuna', 'nombre_comuna'], 'comuna')
-    col_prov = detectar_columna(df_viv, [COL_PROVINCIA, 'provincia', 'nom_provincia'], 'provincia')
-    col_agua = detectar_columna(df_viv, [COL_AGUA, 'p03', 'agua', 'agua_potable', 'p3', 'proced_agua'], 'agua')
-    col_elec = detectar_columna(df_viv, [COL_ELECTRIC, 'p04', 'electricidad', 'elec', 'p4'], 'electricidad')
-    col_alc  = detectar_columna(df_viv, [COL_ALCANT, 'p05', 'alcantarillado', 'p5', 'sist_agua_serv'], 'alcantarillado')
-
-    if not col_com:
-        print("  No se pudo procesar Tarea 5 por columnas faltantes.")
-        return
-
+    print("\n=== TAREA 5: Servicios Básicos ===")
     df = df_viv.copy()
-    group_cols = [c for c in [col_prov, col_com] if c]
+    agregar_nombres(df)
+    group = ['nombre_provincia', 'nombre_comuna']
 
-    agg_dict = {'total_viviendas': (group_cols[0], 'count')}
-    result_df = df.groupby(group_cols).size().reset_index(name='total_viviendas')
+    res = df.groupby(group).size().reset_index(name='total_viviendas')
 
-    # Agua potable: código 1 = Red pública (acceso formal) en Censo 2024
-    # Cualquier otro código = sin acceso a red pública
-    if col_agua:
-        agua_agg = df.groupby(group_cols).apply(
-            lambda x: (x[col_agua] == 1).sum()
-        ).reset_index(name='con_agua_potable')
-        result_df = result_df.merge(agua_agg, on=group_cols)
+    # Agua: código 1 = red pública
+    if COL_AGUA in df.columns:
+        a = df.groupby(group).apply(lambda x: (x[COL_AGUA]==1).sum()).reset_index(name='con_agua_red_publica')
+        res = res.merge(a, on=group)
+        res['pct_agua'] = (res['con_agua_red_publica'] / res['total_viviendas'] * 100).round(2)
+        res['pct_sin_agua'] = (100 - res['pct_agua']).round(2)
 
-    # Electricidad: código 1 = Sí tiene
-    if col_elec:
-        elec_agg = df.groupby(group_cols).apply(
-            lambda x: (x[col_elec] == 1).sum()
-        ).reset_index(name='con_electricidad')
-        result_df = result_df.merge(elec_agg, on=group_cols)
+    # Electricidad: código 1 = red pública
+    if COL_ELEC in df.columns:
+        e = df.groupby(group).apply(lambda x: (x[COL_ELEC]==1).sum()).reset_index(name='con_electricidad_red')
+        res = res.merge(e, on=group)
+        res['pct_electricidad'] = (res['con_electricidad_red'] / res['total_viviendas'] * 100).round(2)
+        res['pct_sin_electricidad'] = (100 - res['pct_electricidad']).round(2)
 
-    # Alcantarillado: código 1 = Red pública de alcantarillado
-    if col_alc:
-        alc_agg = df.groupby(group_cols).apply(
-            lambda x: (x[col_alc] == 1).sum()
-        ).reset_index(name='con_alcantarillado')
-        result_df = result_df.merge(alc_agg, on=group_cols)
+    # Servicio higiénico: código 1 = WC conectado a alcantarillado
+    if COL_SHG in df.columns:
+        s = df.groupby(group).apply(lambda x: (x[COL_SHG]==1).sum()).reset_index(name='con_alcantarillado')
+        res = res.merge(s, on=group)
+        res['pct_alcantarillado'] = (res['con_alcantarillado'] / res['total_viviendas'] * 100).round(2)
+        res['pct_sin_alcantarillado'] = (100 - res['pct_alcantarillado']).round(2)
 
-    # Calcular porcentajes
-    total = result_df['total_viviendas']
-    for col_servicio, nombre in [
-        ('con_agua_potable', 'agua'),
-        ('con_electricidad', 'electricidad'),
-        ('con_alcantarillado', 'alcantarillado'),
-    ]:
-        if col_servicio in result_df.columns:
-            result_df[f'pct_{nombre}'] = (result_df[col_servicio] / total * 100).round(2)
-            result_df[f'sin_{nombre}'] = total - result_df[col_servicio]
-            result_df[f'pct_sin_{nombre}'] = (result_df[f'sin_{nombre}'] / total * 100).round(2)
+    pct_sin = [c for c in res.columns if c.startswith('pct_sin_')]
+    if pct_sin:
+        res['indice_brecha_servicios'] = res[pct_sin].mean(axis=1).round(2)
 
-    # Índice de brecha (promedio de los % sin acceso)
-    pct_sin_cols = [c for c in result_df.columns if c.startswith('pct_sin_')]
-    if pct_sin_cols:
-        result_df['indice_brecha_servicios'] = result_df[pct_sin_cols].mean(axis=1).round(2)
+    res.to_csv('tarea5_servicios_basicos.csv', index=False, encoding='utf-8-sig')
+    print(f"  ✓ tarea5_servicios_basicos.csv ({len(res)} comunas)")
 
-    result_df.to_csv('tarea5_servicios_basicos.csv', index=False, encoding='utf-8-sig')
-    print(f"  ✓ Exportado: tarea5_servicios_basicos.csv ({len(result_df)} comunas)")
+    # Detalle con etiquetas para gráficos
+    for col, mapa, nombre in [(COL_AGUA, MAPA_AGUA, 'agua'), (COL_ELEC, MAPA_ELEC, 'electricidad'), (COL_SHG, MAPA_SHG, 'serv_hig')]:
+        if col in df.columns:
+            df[f'label_{nombre}'] = df[col].map(mapa).fillna(df[col].astype(str))
+
+    cols_det = [c for c in ['nombre_provincia','nombre_comuna'] +
+                [f'label_{n}' for n in ['agua','electricidad','serv_hig']] if c in df.columns]
+    df[cols_det].to_csv('tarea5_servicios_detalle.csv', index=False, encoding='utf-8-sig')
+    print(f"  ✓ tarea5_servicios_detalle.csv")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAREA 6 — Indicador de Desarrollo Compuesto
 # ══════════════════════════════════════════════════════════════════════════════
-def tarea6_indicador_desarrollo(df_per, df_hog, df_viv):
+def tarea6_indicador_desarrollo(df_per, df_viv):
     print("\n=== TAREA 6: Indicador de Desarrollo Compuesto ===")
 
-    # Columnas de comuna
-    col_com_per = detectar_columna(df_per, [COL_COMUNA, 'comuna', 'nombre_comuna'], 'comuna_personas')
-    col_com_hog = detectar_columna(df_hog, [COL_COMUNA, 'comuna', 'nombre_comuna'], 'comuna_hogares')
-    col_com_viv = detectar_columna(df_viv, [COL_COMUNA, 'comuna', 'nombre_comuna'], 'comuna_vivienda')
-    col_prov_per = detectar_columna(df_per, [COL_PROVINCIA, 'provincia', 'nombre_provincia'], 'provincia')
+    per = df_per.copy()
+    viv = df_viv.copy()
+    agregar_nombres(per)
+    agregar_nombres(viv)
+    group_per = ['nombre_provincia', 'nombre_comuna']
+    group_viv = ['nombre_provincia', 'nombre_comuna']
 
-    # — Componente 1: Índice de envejecimiento (% personas >= 65 años) —
-    col_edad = detectar_columna(df_per, [COL_EDAD, 'p09', 'edad'], 'edad')
-    env_df = None
-    if col_com_per and col_edad:
-        env_agg = df_per.groupby([col_com_per]).apply(
-            lambda x: (x[col_edad] >= 65).sum() / len(x) * 100
-        ).reset_index(name='pct_mayores65')
-        env_df = env_agg.rename(columns={col_com_per: 'comuna'})
+    # 1. Envejecimiento: % personas >= 65
+    env = per.groupby(group_per).apply(
+        lambda x: (x[COL_EDAD] >= 65).sum() / len(x) * 100
+    ).reset_index(name='pct_mayores65')
 
-    # — Componente 2: Índice de educación baja (% sin educación o básica incompleta) —
-    col_educ = detectar_columna(df_per, [COL_EDUC, 'p14', 'nivel_educ'], 'nivel_educativo')
-    educ_df = None
-    if col_com_per and col_educ:
-        educ_agg = df_per.groupby([col_com_per]).apply(
-            lambda x: (x[col_educ].isin([0, 1, 2])).sum() / len(x) * 100
-        ).reset_index(name='pct_educ_baja')
-        educ_df = educ_agg.rename(columns={col_com_per: 'comuna'})
+    # 2. Educación baja: % con CINE 0 (sin nivel) o 1 (parvularia) o 2 (básica)
+    educ = per.groupby(group_per).apply(
+        lambda x: x[COL_EDUC].isin([0, 1, 2]).sum() / len(x) * 100
+    ).reset_index(name='pct_educ_baja')
 
-    # — Componente 3: Índice de hacinamiento (% hogares hacinados) —
-    col_per_hog = detectar_columna(df_hog, [COL_N_PERSONAS, 'n_personas', 'cant_per', 'tot_per'], 'n_personas_hogar')
-    col_cuar    = detectar_columna(df_hog, [COL_N_CUARTOS, 'n_cuartos', 'cant_cuar', 'cuartos'], 'n_cuartos')
-    hac_df = None
-    if col_com_hog and col_per_hog and col_cuar:
-        df_h = df_hog.copy()
-        df_h = df_h[df_h[col_cuar].notna() & (df_h[col_cuar] > 0)]
-        df_h['hacinado'] = (df_h[col_per_hog] / df_h[col_cuar]) >= 2.5
-        hac_agg = df_h.groupby([col_com_hog]).apply(
-            lambda x: x['hacinado'].sum() / len(x) * 100
-        ).reset_index(name='pct_hacinamiento')
-        hac_df = hac_agg.rename(columns={col_com_hog: 'comuna'})
+    # 3. Hacinamiento: % viviendas con indice >= 2.5
+    hac = viv.groupby(group_viv).apply(
+        lambda x: (x[COL_HACI] >= 2.5).sum() / len(x) * 100
+    ).reset_index(name='pct_hacinamiento')
 
-    # — Componente 4: Brecha de servicios básicos (% viviendas sin acceso) —
-    serv_df = None
-    col_agua = detectar_columna(df_viv, [COL_AGUA, 'p03', 'agua', 'proced_agua'], 'agua')
-    col_elec = detectar_columna(df_viv, [COL_ELECTRIC, 'p04', 'electricidad'], 'electricidad')
-    col_alc  = detectar_columna(df_viv, [COL_ALCANT, 'p05', 'alcantarillado'], 'alcantarillado')
-    if col_com_viv:
-        brechas = []
-        for col_s in [c for c in [col_agua, col_elec, col_alc] if c]:
-            b = df_viv.groupby([col_com_viv]).apply(
-                lambda x, c=col_s: (x[c] != 1).sum() / len(x) * 100
-            ).reset_index(name=f'pct_sin_{col_s}')
-            brechas.append(b.rename(columns={col_com_viv: 'comuna'}))
-        if brechas:
-            serv_df = brechas[0]
-            for b in brechas[1:]:
-                serv_df = serv_df.merge(b, on='comuna', how='outer')
-            pct_sin_cols = [c for c in serv_df.columns if c.startswith('pct_sin_')]
-            serv_df['pct_brecha_servicios'] = serv_df[pct_sin_cols].mean(axis=1)
+    # 4. Brecha de servicios: promedio de % sin acceso a los 3 servicios
+    brecha_cols = []
+    for col in [COL_AGUA, COL_ELEC, COL_SHG]:
+        if col in viv.columns:
+            b = viv.groupby(group_viv).apply(
+                lambda x, c=col: (x[c] != 1).sum() / len(x) * 100
+            ).reset_index(name=f'pct_sin_{col}')
+            brecha_cols.append(b)
 
-    # — Merge de componentes —
-    componentes = [df for df in [env_df, educ_df, hac_df] if df is not None]
-    if not componentes:
-        print("  No hay suficientes componentes para calcular el indicador.")
-        return
+    ind = env.merge(educ, on=group_per, how='outer')
+    ind = ind.merge(hac, on=group_per, how='outer')
+    for b in brecha_cols:
+        ind = ind.merge(b, on=group_per, how='outer')
 
-    indicador = componentes[0]
-    for df_comp in componentes[1:]:
-        indicador = indicador.merge(df_comp, on='comuna', how='outer')
+    pct_sin_cols = [c for c in ind.columns if c.startswith('pct_sin_')]
+    if pct_sin_cols:
+        ind['pct_brecha_servicios'] = ind[pct_sin_cols].mean(axis=1)
 
-    if serv_df is not None and 'pct_brecha_servicios' in serv_df.columns:
-        indicador = indicador.merge(serv_df[['comuna', 'pct_brecha_servicios']], on='comuna', how='outer')
+    # Normalización Min-Max 0–100 (100 = peor situación)
+    dims = [c for c in ['pct_mayores65','pct_educ_baja','pct_hacinamiento','pct_brecha_servicios'] if c in ind.columns]
+    for c in dims:
+        mn, mx = ind[c].min(), ind[c].max()
+        ind[f'{c}_norm'] = ((ind[c]-mn)/(mx-mn)*100).round(2) if mx > mn else 0
 
-    # Agregar nombre de provincia
-    if col_prov_per and col_com_per:
-        prov_map = df_per[[col_com_per, col_prov_per]].drop_duplicates()
-        prov_map.columns = ['comuna', 'provincia']
-        indicador = indicador.merge(prov_map, on='comuna', how='left')
+    norm_cols = [f'{c}_norm' for c in dims]
+    ind['indicador_desarrollo_compuesto'] = ind[norm_cols].mean(axis=1).round(2)
 
-    # — Normalización Min-Max (0-100) y cálculo del indicador compuesto —
-    componentes_cols = [c for c in ['pct_mayores65', 'pct_educ_baja', 'pct_hacinamiento', 'pct_brecha_servicios']
-                        if c in indicador.columns]
+    q33 = ind['indicador_desarrollo_compuesto'].quantile(0.33)
+    q66 = ind['indicador_desarrollo_compuesto'].quantile(0.66)
+    ind['prioridad_politica_publica'] = ind['indicador_desarrollo_compuesto'].apply(
+        lambda v: 'Alta prioridad' if v >= q66 else ('Media prioridad' if v >= q33 else 'Baja prioridad')
+    )
 
-    for col in componentes_cols:
-        col_min = indicador[col].min()
-        col_max = indicador[col].max()
-        if col_max > col_min:
-            indicador[f'{col}_norm'] = ((indicador[col] - col_min) / (col_max - col_min) * 100).round(2)
-        else:
-            indicador[f'{col}_norm'] = 0
+    ind.round(3).to_csv('tarea6_indicador_desarrollo.csv', index=False, encoding='utf-8-sig')
+    print(f"  ✓ tarea6_indicador_desarrollo.csv ({len(ind)} comunas)")
 
-    norm_cols = [f'{c}_norm' for c in componentes_cols if f'{c}_norm' in indicador.columns]
-    if norm_cols:
-        indicador['indicador_desarrollo_compuesto'] = indicador[norm_cols].mean(axis=1).round(2)
-
-        # Clasificación de prioridad de política pública
-        q33 = indicador['indicador_desarrollo_compuesto'].quantile(0.33)
-        q66 = indicador['indicador_desarrollo_compuesto'].quantile(0.66)
-
-        def clasificar_prioridad(val):
-            if val >= q66:
-                return 'Alta prioridad'
-            elif val >= q33:
-                return 'Media prioridad'
-            else:
-                return 'Baja prioridad'
-
-        indicador['prioridad_politica_publica'] = indicador['indicador_desarrollo_compuesto'].apply(clasificar_prioridad)
-
-    indicador = indicador.round(3)
-    indicador.to_csv('tarea6_indicador_desarrollo.csv', index=False, encoding='utf-8-sig')
-    print(f"  ✓ Exportado: tarea6_indicador_desarrollo.csv ({len(indicador)} comunas)")
-    if 'indicador_desarrollo_compuesto' in indicador.columns:
-        print("\n  TOP 10 comunas con mayor prioridad:")
-        top10 = indicador.nlargest(10, 'indicador_desarrollo_compuesto')[
-            ['comuna'] + (['provincia'] if 'provincia' in indicador.columns else []) +
-            ['indicador_desarrollo_compuesto', 'prioridad_politica_publica']
-        ]
-        print(top10.to_string(index=False))
+    print("\n  TOP 10 comunas prioritarias:")
+    cols_show = ['nombre_provincia','nombre_comuna'] + dims + ['indicador_desarrollo_compuesto','prioridad_politica_publica']
+    cols_show = [c for c in cols_show if c in ind.columns]
+    print(ind.nlargest(10,'indicador_desarrollo_compuesto')[cols_show].to_string(index=False))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -457,68 +318,38 @@ def main():
     print("  PREPARACIÓN DE DATOS PARA POWER BI - TALLER 2")
     print("  Censo 2024 - Región de Valparaíso")
     print("=" * 60)
-    print(f"\n  Carpeta de trabajo: {SCRIPT_DIR}")
+    print(f"\n  Carpeta: {SCRIPT_DIR}")
 
-    # Listar todos los CSV presentes en la carpeta del script
-    csvs_en_carpeta = [f for f in os.listdir(SCRIPT_DIR) if f.lower().endswith('.csv')]
-    if csvs_en_carpeta:
-        print(f"  CSV encontrados en esa carpeta: {csvs_en_carpeta}")
-    else:
-        print("  ADVERTENCIA: No hay ningún archivo .csv en la carpeta del script.")
-        print("  Copia tus archivos del Censo a esta carpeta y vuelve a ejecutar.")
+    print("\n[1/3] Personas...")
+    df_per = cargar_csv('personas_valpo.csv')
 
-    # Cargar datos
-    print("\n[1/3] Cargando Base de Personas...")
-    df_per = cargar_csv(PERSONAS_FILE, 'personas_valpo1.csv')
+    print("\n[2/3] Hogares... (no se usa en tareas 3-6, se omite)")
 
-    print("\n[2/3] Cargando Base de Hogares...")
-    df_hog = cargar_csv(HOGARES_FILE, 'hogares_valpo1.csv')
+    print("\n[3/3] Vivienda...")
+    df_viv = cargar_csv('vivienda_valpo.csv')
 
-    print("\n[3/3] Cargando Base de Viviendas...")
-    df_viv = cargar_csv(VIVIENDA_FILE, 'vivienda_valpo1.csv')
+    if df_per is None or df_viv is None:
+        print("\nERROR: faltan archivos. Abortando.")
+        input("\nPresiona Enter para cerrar...")
+        return
 
-    # Normalizar nombres de columnas
-    for df in [df_per, df_hog, df_viv]:
-        if df is not None:
-            normalizar_columnas(df)
-
-    # Guardar columnas en archivo de texto Y mostrar en pantalla
-    print("\n--- Columnas disponibles ---")
-    with open('columnas_debug.txt', 'w', encoding='utf-8') as dbg:
-        for nombre, df in [('PERSONAS', df_per), ('HOGARES', df_hog), ('VIVIENDA', df_viv)]:
-            if df is not None:
-                linea = f"{nombre} : {list(df.columns)}"
-                print(linea)
-                dbg.write(linea + '\n')
-
-    print("\n--- Procesando tareas ---")
-
-    if df_hog is not None:
-        tarea3_hacinamiento(df_hog)
-
-    if df_per is not None:
-        tarea4_educacion_actividad(df_per)
-
-    if df_viv is not None:
-        tarea5_servicios_basicos(df_viv)
-
-    if all(d is not None for d in [df_per, df_hog, df_viv]):
-        tarea6_indicador_desarrollo(df_per, df_hog, df_viv)
-    else:
-        print("\n[AVISO] Tarea 6 requiere los 3 archivos. Verifica que todos estén disponibles.")
+    print("\n--- Procesando ---")
+    tarea3_hacinamiento(df_viv)
+    tarea4_educacion_actividad(df_per)
+    tarea5_servicios_basicos(df_viv)
+    tarea6_indicador_desarrollo(df_per, df_viv)
 
     print("\n" + "=" * 60)
-    print("  ✓ PROCESO COMPLETADO")
-    print("  Archivos generados:")
-    for f in ['tarea3_hacinamiento.csv', 'tarea3_hacinamiento_detalle.csv',
-              'tarea4_educacion_actividad.csv', 'tarea4_educacion_actividad_pct.csv',
-              'tarea5_servicios_basicos.csv', 'tarea6_indicador_desarrollo.csv']:
+    print("  ✓ LISTO — Archivos generados:")
+    for f in ['tarea3_hacinamiento.csv','tarea3_hacinamiento_detalle.csv',
+              'tarea4_educacion_actividad.csv','tarea4_educacion_actividad_pct.csv',
+              'tarea5_servicios_basicos.csv','tarea5_servicios_detalle.csv',
+              'tarea6_indicador_desarrollo.csv']:
         if os.path.exists(f):
-            size = os.path.getsize(f) / 1024
-            print(f"    {f} ({size:.1f} KB)")
+            print(f"    ✓ {f}  ({os.path.getsize(f)/1024:.1f} KB)")
+        else:
+            print(f"    ✗ {f}  (no generado)")
     print("=" * 60)
-    print("\nSiguiente paso: Importa estos CSVs en Power BI")
-    print("(Inicio -> Obtener datos -> Texto/CSV)")
     input("\nPresiona Enter para cerrar...")
 
 
