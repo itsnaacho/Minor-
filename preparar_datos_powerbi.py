@@ -35,6 +35,7 @@ COL_HACI      = 'indice_hacinamiento'   # en vivienda, ya calculado
 COL_NPER_VIV  = 'cant_per'             # personas en vivienda
 COL_NDORM     = 'p5_num_dormitorios'
 COL_AGUA      = 'p6_fuente_agua'
+COL_DISTRIB   = 'p7_distrib_agua'   # distribución dentro de la vivienda (tarea_1 lo exige)
 COL_ELEC      = 'p9_fuente_elect'
 COL_SHG       = 'p8_serv_hig'
 
@@ -209,41 +210,50 @@ def tarea4_educacion_actividad(df_per):
 # ══════════════════════════════════════════════════════════════════════════════
 def tarea5_servicios_basicos(df_viv):
     print("\n=== TAREA 5: Servicios Básicos ===")
+    # Solo viviendas con dato válido en los 4 servicios (igual que tarea_1)
+    cols_serv = [c for c in [COL_AGUA, COL_DISTRIB, COL_SHG, COL_ELEC] if c in df_viv.columns]
     df = df_viv.copy()
     agregar_nombres(df)
-    group = ['nombre_provincia', 'nombre_comuna']
+    for c in cols_serv:
+        df = df[df[c].notna() & (df[c] != -99)]
 
+    group = ['nombre_provincia', 'nombre_comuna']
     res = df.groupby(group).size().reset_index(name='total_viviendas')
 
-    # Agua: código 1 = red pública
-    if COL_AGUA in df.columns:
-        a = df.groupby(group).apply(lambda x: (x[COL_AGUA]==1).sum()).reset_index(name='con_agua_red_publica')
-        res = res.merge(a, on=group)
-        res['pct_agua'] = (res['con_agua_red_publica'] / res['total_viviendas'] * 100).round(2)
-        res['pct_sin_agua'] = (100 - res['pct_agua']).round(2)
+    # Agua potable: red pública (p6==1) Y distribuida dentro de la vivienda (p7==1)
+    tiene_agua = (df[COL_AGUA] == 1)
+    if COL_DISTRIB in df.columns:
+        tiene_agua = tiene_agua & (df[COL_DISTRIB] == 1)
+    df['_tiene_agua'] = tiene_agua.astype(int)
+    a = df.groupby(group)['_tiene_agua'].sum().reset_index(name='con_agua_potable')
+    res = res.merge(a, on=group)
+    res['pct_agua'] = (res['con_agua_potable'] / res['total_viviendas'] * 100).round(2)
+    res['pct_sin_agua'] = (100 - res['pct_agua']).round(2)
 
-    # Electricidad: código 1 = red pública
-    if COL_ELEC in df.columns:
-        e = df.groupby(group).apply(lambda x: (x[COL_ELEC]==1).sum()).reset_index(name='con_electricidad_red')
-        res = res.merge(e, on=group)
-        res['pct_electricidad'] = (res['con_electricidad_red'] / res['total_viviendas'] * 100).round(2)
-        res['pct_sin_electricidad'] = (100 - res['pct_electricidad']).round(2)
+    # Electricidad: red pública (p9==1)
+    df['_tiene_elect'] = (df[COL_ELEC] == 1).astype(int)
+    e = df.groupby(group)['_tiene_elect'].sum().reset_index(name='con_electricidad_red')
+    res = res.merge(e, on=group)
+    res['pct_electricidad'] = (res['con_electricidad_red'] / res['total_viviendas'] * 100).round(2)
+    res['pct_sin_electricidad'] = (100 - res['pct_electricidad']).round(2)
 
-    # Servicio higiénico: código 1 = WC conectado a alcantarillado
-    if COL_SHG in df.columns:
-        s = df.groupby(group).apply(lambda x: (x[COL_SHG]==1).sum()).reset_index(name='con_alcantarillado')
-        res = res.merge(s, on=group)
-        res['pct_alcantarillado'] = (res['con_alcantarillado'] / res['total_viviendas'] * 100).round(2)
-        res['pct_sin_alcantarillado'] = (100 - res['pct_alcantarillado']).round(2)
+    # Alcantarillado: WC conectado a red (p8==1)
+    df['_tiene_alc'] = (df[COL_SHG] == 1).astype(int)
+    s = df.groupby(group)['_tiene_alc'].sum().reset_index(name='con_alcantarillado')
+    res = res.merge(s, on=group)
+    res['pct_alcantarillado'] = (res['con_alcantarillado'] / res['total_viviendas'] * 100).round(2)
+    res['pct_sin_alcantarillado'] = (100 - res['pct_alcantarillado']).round(2)
 
-    pct_sin = [c for c in res.columns if c.startswith('pct_sin_')]
-    if pct_sin:
-        res['indice_brecha_servicios'] = res[pct_sin].mean(axis=1).round(2)
+    # Acceso completo: tiene los 3 servicios (igual que tarea_1)
+    df['_acceso_completo'] = (df['_tiene_agua'] & df['_tiene_elect'] & df['_tiene_alc']).astype(int)
+    ac = df.groupby(group)['_acceso_completo'].sum().reset_index(name='con_acceso_completo')
+    res = res.merge(ac, on=group)
+    res['pct_acceso_completo'] = (res['con_acceso_completo'] / res['total_viviendas'] * 100).round(2)
+    res['indice_brecha_servicios'] = (100 - res['pct_acceso_completo']).round(2)
 
     res.to_csv('tarea5_servicios_basicos.csv', index=False, encoding='utf-8-sig')
     print(f"  ✓ tarea5_servicios_basicos.csv ({len(res)} comunas)")
 
-    # Detalle con etiquetas para gráficos
     for col, mapa, nombre in [(COL_AGUA, MAPA_AGUA, 'agua'), (COL_ELEC, MAPA_ELEC, 'electricidad'), (COL_SHG, MAPA_SHG, 'serv_hig')]:
         if col in df.columns:
             df[f'label_{nombre}'] = df[col].map(mapa).fillna(df[col].astype(str))
@@ -268,45 +278,50 @@ def tarea6_indicador_desarrollo(df_per, df_viv):
     group_viv = ['nombre_provincia', 'nombre_comuna']
 
     # 1. Envejecimiento: % personas >= 65
-    env = per.groupby(group_per).apply(
-        lambda x: (x[COL_EDAD] >= 65).sum() / len(x) * 100
-    ).reset_index(name='pct_mayores65')
+    per['_mayor65'] = (per[COL_EDAD] >= 65).astype(int)
+    env = per.groupby(group_per)['_mayor65'].agg(
+        pct_mayores65=lambda x: x.sum() / len(x) * 100
+    ).reset_index()
 
-    # 2. Educación baja: % con CINE 1 o 2 (sin educación o básica), excluyendo -99
-    per_edu = per[per[COL_EDUC].notna() & (per[COL_EDUC] != -99) & (per[COL_EDUC] > 0)]
-    educ = per_edu.groupby(group_per).apply(
-        lambda x: x[COL_EDUC].isin([1, 2]).sum() / len(x) * 100
-    ).reset_index(name='pct_educ_baja')
+    # 2. Educación baja: % con cine11 <= 2, excluyendo -99 y 0 (igual que tarea_1)
+    per_edu = per[per[COL_EDUC].notna() & (per[COL_EDUC] != -99) & (per[COL_EDUC] > 0)].copy()
+    per_edu['_educ_baja'] = per_edu[COL_EDUC].isin([1, 2]).astype(int)
+    educ = per_edu.groupby(group_per)['_educ_baja'].agg(
+        pct_educ_baja=lambda x: x.sum() / len(x) * 100
+    ).reset_index()
 
     # 3. Hacinamiento: % viviendas con código 2 (medio) o 3 (crítico)
     viv_hac = viv[viv[COL_HACI].isin([1, 2, 3])].copy()
-    hac = viv_hac.groupby(group_viv).apply(
-        lambda x: (x[COL_HACI] >= 2).sum() / len(x) * 100
-    ).reset_index(name='pct_hacinamiento')
+    viv_hac['_hacinado'] = (viv_hac[COL_HACI] >= 2).astype(int)
+    hac = viv_hac.groupby(group_viv)['_hacinado'].agg(
+        pct_hacinamiento=lambda x: x.sum() / len(x) * 100
+    ).reset_index()
 
-    # 4. Brecha de servicios: promedio de % sin acceso a los 3 servicios
-    brecha_cols = []
-    for col in [COL_AGUA, COL_ELEC, COL_SHG]:
-        if col in viv.columns:
-            b = viv.groupby(group_viv).apply(
-                lambda x, c=col: (x[c] != 1).sum() / len(x) * 100
-            ).reset_index(name=f'pct_sin_{col}')
-            brecha_cols.append(b)
+    # 4. Brecha de servicios: % sin acceso completo (igual que tarea_1: los 3 servicios juntos)
+    cols_serv6 = [c for c in [COL_AGUA, COL_DISTRIB, COL_SHG, COL_ELEC] if c in viv.columns]
+    viv6 = viv.copy()
+    for c in cols_serv6:
+        viv6 = viv6[viv6[c].notna() & (viv6[c] != -99)]
+
+    tiene_agua6 = (viv6[COL_AGUA] == 1)
+    if COL_DISTRIB in viv6.columns:
+        tiene_agua6 = tiene_agua6 & (viv6[COL_DISTRIB] == 1)
+    viv6['_acceso_completo'] = (
+        tiene_agua6 & (viv6[COL_ELEC] == 1) & (viv6[COL_SHG] == 1)
+    ).astype(int)
+    brecha = viv6.groupby(group_viv)['_acceso_completo'].agg(
+        pct_brecha_servicios=lambda x: (1 - x.mean()) * 100
+    ).reset_index()
 
     ind = env.merge(educ, on=group_per, how='outer')
     ind = ind.merge(hac, on=group_per, how='outer')
-    for b in brecha_cols:
-        ind = ind.merge(b, on=group_per, how='outer')
+    ind = ind.merge(brecha, on=group_per, how='outer')
 
-    pct_sin_cols = [c for c in ind.columns if c.startswith('pct_sin_')]
-    if pct_sin_cols:
-        ind['pct_brecha_servicios'] = ind[pct_sin_cols].mean(axis=1)
-
-    # Normalización Min-Max 0–100 (100 = peor situación)
+    # Normalización /max (0-1, igual que tarea_1) → luego *100 para Power BI
     dims = [c for c in ['pct_mayores65','pct_educ_baja','pct_hacinamiento','pct_brecha_servicios'] if c in ind.columns]
     for c in dims:
-        mn, mx = ind[c].min(), ind[c].max()
-        ind[f'{c}_norm'] = ((ind[c]-mn)/(mx-mn)*100).round(2) if mx > mn else 0
+        mx = ind[c].max()
+        ind[f'{c}_norm'] = (ind[c] / mx * 100).round(2) if mx > 0 else 0
 
     norm_cols = [f'{c}_norm' for c in dims]
     ind['indicador_desarrollo_compuesto'] = ind[norm_cols].mean(axis=1).round(2)
